@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Reinsurance Dashboard</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Recharts for Data Viz -->
+    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { 
+            BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
+            ResponsiveContainer, LineChart, Line, AreaChart, Area, 
+            ComposedChart, Cell, PieChart, Pie 
+        } = Recharts;
+
+        // --- CONFIGURATION ---
+        // 1. Publish your Google Sheet as CSV
+        // 2. Paste the link here:
+        const DATA_SOURCE_URL = "https://docs.google.com/spreadsheets/d/1lRWfD-ex8j61YYuG5iIgWK4GUEyheYOVnHh2vWTya1U"; 
+
+        // Default Sample Data (In case URL is empty or fails)
+        const SAMPLE_DATA = [
+            { segment: 'Fire', year: '2020', premium: 450, claims: 270 },
+            { segment: 'Fire', year: '2021', premium: 480, claims: 312 },
+            { segment: 'Fire', year: '2022', premium: 520, claims: 364 },
+            { segment: 'Fire', year: '2023', premium: 550, claims: 412 },
+            { segment: 'Fire', year: '2024', premium: 600, claims: 480 },
+            { segment: 'Marine', year: '2020', premium: 200, claims: 130 },
+            { segment: 'Marine', year: '2021', premium: 210, claims: 136 },
+            { segment: 'Marine', year: '2022', premium: 230, claims: 161 },
+            { segment: 'Marine', year: '2023', premium: 240, claims: 156 },
+            { segment: 'Marine', year: '2024', premium: 260, claims: 182 },
+            { segment: 'Motor', year: '2020', premium: 300, claims: 210 },
+            { segment: 'Motor', year: '2021', premium: 320, claims: 240 },
+            { segment: 'Motor', year: '2022', premium: 310, claims: 217 },
+            { segment: 'Motor', year: '2023', premium: 330, claims: 264 },
+            { segment: 'Motor', year: '2024', premium: 350, claims: 297 },
+            { segment: 'Life', year: '2020', premium: 800, claims: 480 },
+            { segment: 'Life', year: '2021', premium: 850, claims: 552 },
+            { segment: 'Life', year: '2022', premium: 900, claims: 630 },
+            { segment: 'Life', year: '2023', premium: 1000, claims: 800 },
+            { segment: 'Life', year: '2024', premium: 1100, claims: 935 }
+        ];
+
+        const App = () => {
+            const [data, setData] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+            const [error, setError] = React.useState(null);
+            const [activeSegment, setActiveSegment] = React.useState('All');
+
+            React.useEffect(() => {
+                const fetchData = async () => {
+                    if (!DATA_SOURCE_URL) {
+                        setData(SAMPLE_DATA);
+                        setLoading(false);
+                        return;
+                    }
+
+                    Papa.parse(DATA_SOURCE_URL, {
+                        download: true,
+                        header: true,
+                        dynamicTyping: true,
+                        complete: (results) => {
+                            // Map CSV data to dashboard format
+                            const formatted = results.data.map(row => ({
+                                segment: row.Segment || row.segment,
+                                year: String(row.Year || row.year),
+                                premium: Number(row.Premium || row.premium),
+                                claims: Number(row.Claims || row.claims)
+                            })).filter(r => r.segment && r.year);
+                            
+                            setData(formatted);
+                            setLoading(false);
+                        },
+                        error: (err) => {
+                            console.error("CSV Parse Error:", err);
+                            setError("Failed to load data. Falling back to sample.");
+                            setData(SAMPLE_DATA);
+                            setLoading(false);
+                        }
+                    });
+                };
+                fetchData();
+            }, []);
+
+            const segments = [...new Set(data.map(d => d.segment))];
+            const years = [...new Set(data.map(d => d.year))].sort();
+
+            const yearlyTrendData = React.useMemo(() => {
+                return years.map(year => {
+                    let filtered = data.filter(d => d.year === year);
+                    if (activeSegment !== 'All') {
+                        filtered = filtered.filter(d => d.segment === activeSegment);
+                    }
+                    
+                    const premium = filtered.reduce((acc, curr) => acc + curr.premium, 0);
+                    const claims = filtered.reduce((acc, curr) => acc + curr.claims, 0);
+                    const ratio = premium > 0 ? ((claims / premium) * 100).toFixed(1) : 0;
+                    
+                    return { year, Premium: premium, Claims: claims, LossRatio: parseFloat(ratio) };
+                });
+            }, [data, activeSegment, years]);
+
+            const currentYearData = React.useMemo(() => {
+                const latestYear = years[years.length - 1];
+                return segments.map(seg => {
+                    const row = data.find(d => d.segment === seg && d.year === latestYear);
+                    const ratio = row && row.premium > 0 ? ((row.claims / row.premium) * 100).toFixed(1) : 0;
+                    return { 
+                        name: seg, 
+                        Premium: row ? row.premium : 0, 
+                        Claims: row ? row.claims : 0, 
+                        Ratio: parseFloat(ratio) 
+                    };
+                });
+            }, [data, segments, years]);
+
+            if (loading) return (
+                <div className="flex h-screen items-center justify-center bg-white">
+                    <div className="text-center">
+                        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className="text-slate-500 font-medium">Loading Live Data...</p>
+                    </div>
+                </div>
+            );
+
+            const latest = yearlyTrendData[yearlyTrendData.length - 1] || {};
+            const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
+                                    Reinsurance Live Hub
+                                    {DATA_SOURCE_URL && <span className="text-xs bg-emerald-100 text-emerald-600 px-2 py-1 rounded-full uppercase tracking-wider">Connected</span>}
+                                </h1>
+                                <p className="text-slate-500 mt-1">Real-time Performance Metrics</p>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-2 bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+                                <button 
+                                    onClick={() => setActiveSegment('All')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeSegment === 'All' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    All
+                                </button>
+                                {segments.map(seg => (
+                                    <button 
+                                        key={seg}
+                                        onClick={() => setActiveSegment(seg)}
+                                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeSegment === seg ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}
+                                    >
+                                        {seg}
+                                    </button>
+                                ))}
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <p className="text-slate-500 text-sm font-medium uppercase tracking-wider">Premium ({latest.year})</p>
+                                <h3 className="text-3xl font-bold text-slate-800 mt-1">${latest.Premium}M</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <p className="text-slate-500 text-sm font-medium uppercase tracking-wider">Claims Incurred</p>
+                                <h3 className="text-3xl font-bold text-slate-800 mt-1 text-red-600">${latest.Claims}M</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <p className="text-slate-500 text-sm font-medium uppercase tracking-wider">Current Loss Ratio</p>
+                                <h3 className="text-3xl font-bold text-slate-800 mt-1">{latest.LossRatio}%</h3>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-96">
+                                <h4 className="font-bold mb-6">Premium vs Claims Trend</h4>
+                                <ResponsiveContainer width="100%" height="80%">
+                                    <ComposedChart data={yearlyTrendData}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="year" axisLine={false} tickLine={false} />
+                                        <YAxis axisLine={false} tickLine={false} />
+                                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none' }} />
+                                        <Legend verticalAlign="top" align="right" />
+                                        <Bar dataKey="Premium" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                                        <Area type="monotone" dataKey="Claims" fill="#ef444420" stroke="#ef4444" strokeWidth={3} />
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 h-96">
+                                <h4 className="font-bold mb-6">Loss Ratio Trend (%)</h4>
+                                <ResponsiveContainer width="100%" height="80%">
+                                    <LineChart data={yearlyTrendData}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="year" axisLine={false} tickLine={false} />
+                                        <YAxis axisLine={false} tickLine={false} domain={[0, 100]} />
+                                        <Tooltip />
+                                        <Line type="monotone" dataKey="LossRatio" stroke="#f59e0b" strokeWidth={4} dot={{r: 6, fill:'#f59e0b', stroke:'#fff'}} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                                <h4 className="text-lg font-bold">Performance Snapshot ({latest.year})</h4>
+                            </div>
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                                    <tr>
+                                        <th className="px-6 py-4">Segment</th>
+                                        <th className="px-6 py-4 text-right">Premium ($M)</th>
+                                        <th className="px-6 py-4 text-right">Claims ($M)</th>
+                                        <th className="px-6 py-4 text-center">Ratio (%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {currentYearData.map(row => (
+                                        <tr key={row.name} className="hover:bg-slate-50">
+                                            <td className="px-6 py-4 font-semibold">{row.name}</td>
+                                            <td className="px-6 py-4 text-right">${row.Premium}M</td>
+                                            <td className="px-6 py-4 text-right">${row.Claims}M</td>
+                                            <td className="px-6 py-4 text-center">
+                                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${row.Ratio > 80 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                                    {row.Ratio}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
